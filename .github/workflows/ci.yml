@@ -1,0 +1,31 @@
+name: CI
+on:
+  push:
+  pull_request:
+
+jobs:
+  docker-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and start the app
+        run: docker compose up -d --build
+      - name: Smoke-test the installer API
+        run: |
+          for i in $(seq 1 30); do
+            if curl --fail --silent --show-error http://127.0.0.1:3000/api/setup/status/ | grep -q '"installed":false'; then
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Installer API unavailable" >&2
+          exit 1
+      - name: Run Django unit tests
+        run: docker compose exec -T backend python manage.py test core
+      - name: Collect logs on failure
+        if: failure()
+        run: docker compose logs --no-color
+      - name: Stop containers
+        if: always()
+        run: docker compose down -v

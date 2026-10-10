@@ -1,0 +1,63 @@
+name: peykbox
+
+services:
+  bootstrap:
+    image: python:3.12-alpine
+    command: ["python", "/scripts/bootstrap.py"]
+    volumes:
+      - ./scripts/bootstrap.py:/scripts/bootstrap.py:ro
+      - app_secrets:/run/peykbox
+    restart: "no"
+
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: peykbox
+      POSTGRES_USER: peykbox
+      POSTGRES_PASSWORD_FILE: /run/peykbox/db_password
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - app_secrets:/run/peykbox:ro
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U peykbox -d peykbox"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings
+      DB_HOST: db
+      DB_NAME: peykbox
+      DB_USER: peykbox
+      DB_PORT: "5432"
+    volumes:
+      - app_secrets:/run/peykbox:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health/', timeout=4)"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:3000:3000"
+    restart: unless-stopped
+
+volumes:
+  db_data:
+  app_secrets:
